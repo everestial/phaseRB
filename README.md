@@ -1,66 +1,33 @@
 
-# phASER
-**ph**asing and **A**llele **S**pecific **E**xpression from **R**NA-seq
+# phaseRB
+**phase short haplotype blocks in individual samples using Readback phasing methods**
 
 Performs haplotype phasing using read alignments in BAM format from both DNA and RNA based assays.
 
-Developed by [Stephane E. Castel](mailto:scastel@nygenome.org) in the [Lappalainen Lab](http://tllab.org) at the New York Genome Center and Columbia University Department of Systems Biology.
+**`phaseRB` application is a part of [`phaseIT`](https://github.com/everestial/PhaseIT) pipeline. The initial preparation of short haplotype blocks is inspired from [phaser](https://github.com/secastel/phaser/tree/master/phaser) developed by [Stephane E. Castel](mailto:scastel@nygenome.org).**
+`phaseRB`borrows the required code, specifially for doing RBphasing but provides several independent addons:
+  - capacity to run RBphasing in memory efficient mode : when the number of scaffolds are high, or when the computation platform doesn't have enough memory phaser will freeze the platform without progress (prolly several days). `phaseRB` provides an option to overcome this barrier by run readbackphasing per chromosome which are automatically joined after the run is complete.
+  - capacity to provide custom `alignment score cutoff`value : while `alignment score cutoff` is computed automatically by `phaser` in `phaseRB` provides custom values. This could be useful if the BAM files are already quality filtered.
+  - capacity to run RBphasing in all samples mode : `phaser` only provides haplotype phasing in per sample mode, `phaseRB` provides a method to run RBphasing in all samples mode. 
+  - future upgrades to python3.
 
 Runs on Python 2.7.x and has the following dependencies: [SciPy](http://www.scipy.org), [NumPy](http://www.numpy.org), [samtools](http://www.htslib.org), [tabix](http://www.htslib.org/doc/tabix.html), [bedtools](http://bedtools.readthedocs.org), [Cython](http://cython.org)
 
 # Citation
 Castel, S. E., Mohammadi, P., Chung, W. K., Shen, Y. & Lappalainen, T. Rare variant phasing and haplotypic expression from RNA sequencing with phASER. Nat Commun 7, 12817 (2016).
-
-# IMPORTANT NOTE - BUG FIX
-A bug was introduced in version 0.9.8 (12/16/16) and fixed in version 0.9.9.4 (06/21/17) that caused problems with haplotypic counts when using the --haplo_count_blacklist argument. This bug affects the haplotypic counts generated (haplotypic_counts.txt), and any downstream analyses of those counts, including generating gene level haplotypic expression with phaser_gene_ae. If the --haplo_count_blacklist argument was not specified, then the results were not affected. In addition, a new "hg19_haplo_count_blacklist.bed.gz" file has been uploaded, which addresses problems related to this issue. If you used the --haplo_count_blacklist argument with a version of phASER between 0.9.8 and 0.9.9.3 you must re-run your analyses with version 0.9.9.4+.
-
-# Tutorial
-I have written a [step-by-step tutorial](https://stephanecastel.wordpress.com/2017/02/15/how-to-generate-ase-data-with-phaser/) describing how to use phASER to generate ASE data. If you aren't sure where to start give this a read.
-
-# Setup
-Before phASER can be run the read variant mapper module must be compiled. This requires [Cython](http://cython.org) and can be performed with the following command: "python2.7 setup.py build_ext --inplace". **NOTE** Cython requires the package python-devel to be installed. This can be installed using a package manager using e.g. "yum install python-devel.x86_64".
+Giri, B. PhaseIT - Pipeline for phasing haploypes using short readbackphased hapltoypes in hybrids and populations with low genomic resouces. 
 
 # Usage
 Requires a VCF and BAM, produces a VCF with computed haplotype phases and result files containing haplotype details, statistics, and read counts. By default only sites with the "PASS" flag in the VCF will be considered, however this behavior can be changed using the "--pass_only 0" argument.
 
-**Test case**
-
-1000 Genomes individual NA06986 with Phase 3 genotype data and Geuvadis RNA-Seq data. Coordinates are in hg19.
-* VCF: https://www.dropbox.com/s/u68p4po2fut2eid/NA06986.vcf.gz?dl=0
-* VCF Index: https://www.dropbox.com/s/328dvei4cqbs7n6/NA06986.vcf.gz.tbi?dl=0
-* BAM: https://www.dropbox.com/s/rxrr01dv4zyhagj/NA06986.2.M_111215_4.bam?dl=0
-* BAM Index: https://www.dropbox.com/s/vunmr97j8v6dqi8/NA06986.2.M_111215_4.bam.bai?dl=0
+# Tutorial
+A [step-by-step tutorial](https://github.com/everestial/phaseRB/wiki) for setting up `phaseRB` and running read backphasing is described.
 
 Run command:
 
-python2.7 phaser.py --vcf NA06986.vcf.gz --bam NA06986.2.M_111215_4.bam --paired_end 1 --mapq 255 --baseq 10 --sample NA06986 --o phaser_test_case
+python2 phaser.py --bam realigned_ms01e.chr2n3.bam --vcf phased.MySpF1.chr2n3.vcf.gz --sample ms01e --o ms01e --mapq 40 --baseq 10 --paired_end 1 --id_separator - --pass_only 0 --process_slow 1
 
-**Useful files**
-
-We suggest that you exclude variants in HLA genes using the "--blacklist" argument becuase of the high mapping error rate in these genes. A file containing coordinates is included here for convenience:
-
-hg19:
-* Without 'chr' in contig name: https://www.dropbox.com/s/fbfntaa4oc75x6m/hg19_hla.bed.gz?dl=0
-* With 'chr' in contig name: https://www.dropbox.com/s/wm9gkb66j7d7xjx/hg19_hla.chr.bed.gz?dl=0
-
-hg38:
-* Without 'chr' in contig name: https://www.dropbox.com/s/9v5dpjrqm2k2cx7/hg38_hla.bed.gz?dl=0
-* With 'chr' in contig name: https://www.dropbox.com/s/1zapu5n4aeyi1g6/hg38_hla.chr.bed.gz?dl=0
-
-If your goal is to do gene level allelic expression analysis, you may want to consider using the "--haplo_count_blacklist" argument, which can exclude known problem sites from haplotypic counts. If you have not taken any percautions to deal with allelic mapping bias, we suggest you exclude sites with known bias, as outlined in [Castel et al](http://genomebiology.biomedcentral.com/articles/10.1186/s13059-015-0762-6). A file containing coordinates for hg19 is included here for convenience: 
-
-hg19:
-* Without 'chr' in contig name: https://www.dropbox.com/s/rh1yp5c9bgguso1/hg19_haplo_count_blacklist.bed.gz?dl=0
-* With 'chr' in contig name: https://www.dropbox.com/s/i8ly89sfztlmomq/hg19_haplo_count_blacklist.chr.bed.gz?dl=0
-
-hg38:
-* Without 'chr' in contig name: https://www.dropbox.com/s/k9j3kbnpfix8lwi/hg38_haplo_count_blacklist.bed.gz?dl=0
-* With 'chr' in contig name: https://www.dropbox.com/s/9cn9477bcutvuc7/hg38_haplo_count_blacklist.chr.bed.gz?dl=0
-
-
-**Combining data across sequencing run types**
-
-All input BAMs will be used to generate haplotypes and phase variants, so they must all have arisen from the same genome or individual. Haplotypic counts are produced separately for each input BAM in in o.haplotypic_counts.txt, and stay separated when phaser_gene_ae.py is run. You can exclude BAMs from being outputted in o.haplotypic_counts.txt, for example those that are DNA-seq based, using the "--haplo_count_bam_exclude" argument. If you want to combine counts from across BAMs, merge the BAMs beforehand and include the merged BAM as a single input to phASER.
+python phaser.py --bam realigned_ms01e.chr2n3.bam --vcf phased.MySpF1.chr2n3.vcf.gz --sample ms01e --o ms01e --mapq 40 --baseq 10 --paired_end 1 --id_separator - --pass_only 0 --process_slow 1
 
 # Arguments
 ## Required
