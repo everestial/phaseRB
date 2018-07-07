@@ -1,0 +1,2 @@
+variant_a	variant_b	supporting_connections	total_connections	conflicting_configuration_p	phase_concordant
+2-15883371-A-T	2-15883431-A-T	1	1	1	.

@@ -1,0 +1,3 @@
+variant_a	rsid_a	variant_b	rsid_b	configuration
+2-15883371-A-T	2-15883371-A-T	2-15883431-A-T	2-15883431-A-T	cis
+2-15883431-A-T	2-15883431-A-T	2-15883371-A-T	2-15883371-A-T	cis

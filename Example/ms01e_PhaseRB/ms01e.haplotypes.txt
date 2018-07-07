@@ -1,0 +1,3 @@
+contig	start	stop	length	variants	variant_ids	variant_alleles	reads_hap_a	reads_hap_b	reads_total	edges_supporting	edges_total	annotated_phase	phase_concordant	gw_phase	gw_confidence
+2	15883371	15883431	60	2	2-15883371-A-T,2-15883431-A-T	A,A|T,T	44	43	87	1	1	--|--	1	--|--	0.5
+2	15882821	15882822	1	1	2-15882822-G-A	G|A	42	27	69	0	0	-|-	nan	-|-	nan

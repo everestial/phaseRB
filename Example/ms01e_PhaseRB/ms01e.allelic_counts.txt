@@ -1,0 +1,4 @@
+contig	position	variantID	refAllele	altAllele	refCount	altCount	totalCount
+2	15883371	2-15883371-A-T	A	T	2	0	2
+2	15882822	2-15882822-G-A	G	A	42	27	69
+2	15883431	2-15883431-A-T	A	T	43	43	86
