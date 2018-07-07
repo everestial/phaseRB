@@ -20,19 +20,20 @@ import resource
 import glob
 import collections
 import datetime
+import io
 
 
 def main():
 	#Arguments passed
 	parser = argparse.ArgumentParser()
 	# required
-	parser.add_argument("--bam", help="Indexed BAMs (comma separated) containing aligned reads", required = False)
-	parser.add_argument("--vcf", help="VCF for sample, must be gzipped and tabix indexed.", required = True)
-	parser.add_argument("--sample", help="Sample name in VCF", required = False)
+	parser.add_argument("--bam", help="Indexed BAMs (comma separated) containing aligned reads", required = False, default='')
+	parser.add_argument("--vcf", help="VCF for sample, must be gzipped and tabix indexed.", required = True, default='')
+	parser.add_argument("--sample", help="Sample name in VCF", required = False, default='')
 	parser.add_argument("--mapq", help="Minimum MAPQ for reads to be used for phasing. Can be a comma separated list, each value corresponding to the min MAPQ for a file in the input BAM list. Useful in cases when using both for example DNA and RNA libraries which having different mapping qualities.", required = True)
 	parser.add_argument("--baseq", type=int, help="Minimum baseq for bases to be used for phasing", required = True)
 	parser.add_argument("--paired_end", help="Sequencing data comes from a paired end assay (0,1). Can be a comma separated list, each value specifying whether sequencing data comes from a paired end assay for a file in the input BAM list. If set to true phASER will require all reads to have the 'read mapped in proper pair' flag.", required = True)
-	parser.add_argument("--o", help="Out prefix",required = False)
+	parser.add_argument("--o", help="Out prefix",required = True)
 
 
 	# optional
@@ -102,20 +103,7 @@ def main():
 	if check_dependency("bgzip") == False: fatal_error("External dependency 'bgzip' not installed.");
 	if check_dependency("tabix") == False: fatal_error("External dependency 'tabix' not installed.");
 	if check_dependency("bedtools") == False: fatal_error("External dependency 'bedtools' not installed.");
-
-	## **to do: Also add bcftools .....
-	## ** use tabix to split the VCF or just pass the args.chr mode under memory efficient mode
-
-	## prolly delete
-	'''
-	my_vcf = pyVCF.Reader(args.vcf)
-	print(my_vcf)
-	print(my_vcf.samples)
-	print(my_vcf.contigs)
-	print(my_vcf.metadata)
-
-	sys.exit()
-	'''
+	if check_dependency("bcftools") == False: fatal_error("External dependency 'bcftools' not installed.");
 
 
 	if args.id_separator == ":" or args.id_separator == "":
@@ -155,29 +143,51 @@ def main():
 	## make a sample list if running RBphasing in all samples mode
 	map_sample_column = sample_column_map(args.vcf);
 
-	global org_args_chr, org_args_chr_list  # storing the original args.chr value
-	org_args_chr = copy.copy(args.chr)
-	org_args_chr_list = copy.copy(args.chr.split(','))
 	# above code returns a key-value of all the "sample:sample position" in the vcf file
 
 	# to run multisample mode just select the required samples
-	if args.multi_sample == '1':
+	if args.multi_sample != '':
+		print('Running phaserRB in multisample mode.')
+		'''Multi sample mode should suffice following condition else it won't proceed. '''
+		if args.multi_bam == '':
+			print('Multiple sample mode should have multiple bam mode')
+			sys.exit()
+		else:
+			multi_bam_path = copy.copy(args.multi_bam)
+
+		if '#' not in args.o:
+			print('Output prefix in multi sample mode should contain "#"')
+			sys.exit()
+
+		if args.sample != '':
+			print('--sample is deactivated under multisample mode')
+			sys.exit()
+
+		if args.multi_sample == '1':
+			map_sample_column = map_sample_column
+			print('Using all the samples in the input VCF file for multisample mode.')
+		elif ',' in args.multi_sample:
+			sample_of_interest = args.multi_sample.split(',')
+			print('Using samples "{}" for multisample mode.'.
+				  format(','.join(sample_of_interest)))
+
+			updated_sample_column = collections.OrderedDict()
+			for itemx in sample_of_interest:
+				if itemx in map_sample_column:
+					updated_sample_column[itemx] = map_sample_column[itemx]
+				else:
+					print('sample %s not found in input VCF file' % itemx)
+					sys.exit()
+			map_sample_column = updated_sample_column
+		else:
+			print('--multi_sample argument should be 1 to represent all samples'
+					'\nelse provide comma separated list of sample names of interest.')
+			sys.exit()
+	else:
+		print('Running phaseRB in single sample mode.')
 		map_sample_column = map_sample_column
-	elif ',' in args.multi_sample:
-		sample_of_interest = args.multi_sample.split(',')
-		updated_sample_column = collections.OrderedDict()
-		for itemx in sample_of_interest:
-			if itemx in map_sample_column:
-				updated_sample_column[itemx] = map_sample_column[itemx]
-			else:
-				print('sample %s not found in input VCF file' % itemx)
-				sys.exit()
 
-		map_sample_column = updated_sample_column
-
-	else: map_sample_column = map_sample_column
-
-
+	# Check files availability.
 	check_files = [args.vcf,args.blacklist,args.haplo_count_blacklist]
 	for xfile in check_files:
 		if xfile != "":
@@ -202,22 +212,12 @@ def main():
 	##Now, if "multi_sample' is activated run each sample one by one.
 	sample_start_time = time.time()
 	if args.multi_sample != '':
-		print('Running phaserRB in multi sample mode.')
+		print('Starting multi sample mode ...')
 		print
 
-		'''Multi sample mode should suffice following condition else it won't proceed. '''
-		if args.multi_bam == '':
-			print('Multiple sample mode should have multiple bam mode')
-			sys.exit()
-		else: multi_bam_path = copy.copy(args.multi_bam)
+		out_path = copy.copy(args.o)
+		vcfs_to_merge = []  # to merge the output single sample vcfs in multisample mode.
 
-		if '#' not in args.o:
-			print('Output prefix in multi sample mode should contain "#"')
-			sys.exit()
-		else: out_path = copy.copy(args.o)
-
-
-		vcfs_to_merge = []  # to merge the vcfs in multisample mode.
 		# now, process each sample on a for-loop
 		# in future this may be run in parallel or multiprocessed.
 		for sample_name, sample_pos in map_sample_column.items():
@@ -240,8 +240,6 @@ def main():
 		print('COMPLETED ReadBackPhasing of all the samples in multi sample mode in {} .'.
 			  format(time.strftime("%H:%M:%S", time.gmtime(time.time()-sample_start_time))))
 
-
-		#** To do: Now, merge the phased VCFs using bcftools
 
 		'''Merge the VCF files for individual samples into one file. 
 		   i.e create a multisample VCF. '''
@@ -278,7 +276,7 @@ def main():
    If multi sample mode is activate each sample is passed through this function recursively. '''
 def parse_sample(sample_name, map_sample_column, bam_file, sample_out_path, contig_ban):
 
-	args.o = sample_out_path
+	#args.o = sample_out_path
 	args.bam = bam_file
 
 	check_bams = args.bam.split(",");
@@ -290,10 +288,8 @@ def parse_sample(sample_name, map_sample_column, bam_file, sample_out_path, cont
 				fatal_error(
 					"Index for BAM %s not found. BAM files must be indexed, with naming 'sample.bam.bai'." % (xfile));
 
-
 	global sample_column
 	start_time = time.time()
-
 
 	if sample_name in map_sample_column:
 		sample_column = map_sample_column[sample_name];
@@ -310,9 +306,11 @@ def parse_sample(sample_name, map_sample_column, bam_file, sample_out_path, cont
 		fun_flush_print("    using all the chromosomes ...");
 		decomp_str = "gunzip -c "+args.vcf;
 
+	## ** what is this code doing ??
 	vcf_out = tempfile.NamedTemporaryFile(delete=False);
 	vcf_out.close();
 	vcf_path = vcf_out.name;
+
 
 	if args.blacklist != "":
 		fun_flush_print("    removing blacklisted variants and processing VCF...");
@@ -346,18 +344,22 @@ def parse_sample(sample_name, map_sample_column, bam_file, sample_out_path, cont
 	## Also, process RBphasing in either slow vs. all memory mode
 
 	# storing the string value of original output prefix
-	org_outprefix = copy.copy(args.o)
+	#org_outprefix = copy.copy(args.o)
+	#org_outprefix = copy.copy(args.o)
 
+	#stream_vcf = open(vcf_path, "r")
 	if args.process_slow == 0:
 		'''loads all the bam reads in to the memory. This is good when RAM is big '''
 		print('    Memory efficient mode is deactivated.\n'
 			  '    If RAM is limited the process in memory efficient mode using the flag "--process_slow".')
-		stream_vcf = gzip.open(args.vcf)#.read();
-		chr=args.chr
-		process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vcf_out, last_chr=False)
+		#stream_vcf = gzip.open(args.vcf)#.read();
+		stream_vcf = open(vcf_path, "r")
+		chr_of_interest = args.chr
+		process_vcf(stream_vcf, chr_of_interest, contig_ban, set_haplo_blacklist,
+					start_time, vcf_out, sample_out_path, last_chr=False)
 
 		if args.multi_sample != '':
-			sample_vcf_name = org_outprefix.replace('#', sample_name) + ".vcf.gz"
+			sample_vcf_name = sample_out_path.replace('#', sample_name) + ".vcf.gz"
 
 	elif args.process_slow == 1:
 		print('    ReadBackPhasing is proceeding in a memory efficient mode.\n'
@@ -366,58 +368,66 @@ def parse_sample(sample_name, map_sample_column, bam_file, sample_out_path, cont
 		args.sample = sample_name
 
 		## ** Adding a method to find the list of unique chromosome names - by BKG
-		#update unique_chr_list based on args.chr
-		if org_args_chr == '':
+		if args.chr == '':
 			'''if original args.chr was empty, use all the chromosomes'''
 			argu0 = ["tabix -l " + args.vcf]
 			process_col0 = subprocess.Popen(argu0, stdout=subprocess.PIPE,
 											stderr=subprocess.PIPE, shell=True, executable='/bin/bash')
 			uniq_chr = process_col0.communicate()[0]
-			uniq_chr_list = uniq_chr.rstrip('\n').split("\n")
+			chr_of_interest = uniq_chr.rstrip('\n').split("\n")
 
-		elif org_args_chr != '':
+		elif args.chr != '':
 			''' else use only the chromosome of interest '''
-			uniq_chr_list = org_args_chr_list
-
-		print('unq chr list', uniq_chr_list)
+			chr_of_interest = args.chr.split(',')
 
 		## Now, we stream the vcf for each chromosome separately, and set new stream_vcf path
 		# update the original output prefix if multiSample mode is active
 		if args.multi_sample != '':
-			org_outprefix = org_outprefix.replace('#', sample_name)
+			org_outprefix = sample_out_path.replace('#', sample_name)
+		else: org_outprefix = sample_out_path
 
-		for nth, unq_chr in enumerate(uniq_chr_list):
-			if nth == len(uniq_chr_list):
+		#stream_vcf = open(vcf_path, "r")
+		for nth, unq_chr in enumerate(chr_of_interest):
+			if nth == len(chr_of_interest):
 				last_chr = True
 			else: last_chr = False
+
+			# re-read vcf file again from temp location. **This is redundant and may need optimization
+			stream_vcf = open(vcf_path, "r")
 
 			# also update the args.o (output prefix name)
 			# since this argument is global in scope it will be pass throughout this python file.
 			# ** this will need more cleaner approach in future.
-			args.o = org_outprefix + unq_chr
-
-			split_vcf = ["tabix -h " + args.vcf + ' ' + unq_chr]
-			#vcf_by_chr = subprocess.Popen(split_vcf, stdout=subprocess.PIPE,
-											#stderr=subprocess.PIPE, shell=True, executable='/bin/bash')
-
-			# write the std-output to a temporary file
-			with open(sample_name + '_temp.vcf', 'w') as tempvcf:
-				subprocess.check_call(split_vcf, shell=True, executable='/bin/bash', stdout=tempvcf)
-
-				#tempvcf.write(vcf_by_chr.stdout)
-
-			#** Optimize stream_vcf in future by writing to a temporary file and then read line by line.
-			# #stream_vcf = vcf_by_chr.communicate()[0].rstrip('\n').split('\n')  # **
-			stream_vcf = open(sample_name + '_temp.vcf')
+			sample_out_path_by_chr = org_outprefix + unq_chr
 
 			# now, pass the data to the required function
-			process_vcf(stream_vcf, unq_chr, contig_ban, set_haplo_blacklist, start_time, vcf_out, last_chr)
-			os.remove(sample_name + '_temp.vcf')  # remove temporary file
+			process_vcf(stream_vcf, unq_chr, contig_ban, set_haplo_blacklist, start_time, vcf_out, sample_out_path_by_chr, last_chr)
+			#os.remove(sample_name + '_temp.vcf')  # remove temporary file
+
+			time.sleep(1.5)
+			print
+
+			##### ** Code for the future
+			# to split the VCF by chromosome, store as tempfile and stream as stream_vcf
+			# split_vcf = ["tabix -h " + args.vcf + ' ' + unq_chr]
+			# vcf_by_chr = subprocess.Popen(split_vcf, stdout=subprocess.PIPE,
+			# stderr=subprocess.PIPE, shell=True, executable='/bin/bash')
+
+			# write the std-output to a temporary file
+			# with open(sample_name + '_temp.vcf', 'w') as tempvcf:
+			# subprocess.check_call(split_vcf, shell=True, executable='/bin/bash', stdout=tempvcf)
+			# tempvcf.write(vcf_by_chr.stdout)
+
+			# ** Optimize stream_vcf in future by writing to a temporary file and then read line by line.
+			# stream_vcf = vcf_by_chr.communicate()[0].rstrip('\n').split('\n')  # **
+			# stream_vcf = open(sample_name + '_temp.vcf')
+
 
 			# reset the args.chr value to original
 			# ** this maynot be very secure and will need optimization in the future
-			args.chr = org_args_chr
-			print
+			#args.chr = org_args_chr
+			##################################################
+
 
 
 		## Now, merge the output for each contig together to one file
@@ -426,7 +436,7 @@ def parse_sample(sample_name, map_sample_column, bam_file, sample_out_path, cont
 		files_to_delete = []  # store the names that will be deleted at the end
 
 		## find the several group of files separated by chromosome/contig
-		for chr_ in uniq_chr_list:
+		for chr_ in chr_of_interest:
 			#for name in os.listdir(org_outprefix + '_' + chr_ + '.'):
 			#for name in glob.glob(org_outprefix + '_' + chr_ + '.'):
 
@@ -517,8 +527,8 @@ def parse_sample(sample_name, map_sample_column, bam_file, sample_out_path, cont
 '''This function processes vcf for the input sample. If memory_efficient mode is activated, 
    vcf for each chromosome/scaffold would be passed into this function, if not all the VCF 
    will be passed at once. '''
-def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vcf_out, last_chr):
-	args.chr = chr
+def process_vcf(stream_vcf, chromosome, contig_ban, set_haplo_blacklist, start_time, vcf_out, out_prefix, last_chr):
+	chrom_of_interest = chromosome
 	mapper_out = tempfile.NamedTemporaryFile(delete=False);
 	bed_out = tempfile.NamedTemporaryFile(delete=False);
 	het_count = 0;
@@ -533,7 +543,7 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 	filter_count = 0;
 
 	for line in stream_vcf:
-		vcf_columns = line.rstrip().split("\t");
+		vcf_columns = line.rstrip('\n').split("\t");
 		if line.startswith("#") == False:
 			#1       10177   .       A       AC      100     PASS    AC=2130;AF=0.425319;AN=5008;NS=2504;DP=103152;EAS_AF=0.3363;AMR_AF=0.3602;AFR_AF=0.4909;EUR_AF=0.4056;SAS_AF=0.4949;AA=|||unknown(NO_COVERAGE)  GT      1|0
 			unphased = False;
@@ -545,7 +555,7 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 								"found in the contig names and try again."%(item));
 			filter = vcf_columns[6];
 
-			if args.chr == "" or args.chr == chr:
+			if chrom_of_interest == "" or chrom_of_interest == chr:
 				if chr not in chromosome_pool: chromosome_pool[chr] = [];
 				fields = vcf_columns[8].split(":");
 				if "GT" in fields:
@@ -570,12 +580,13 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 					else:
 						print_warning("Genotype, defined by GT not found in input VCF for variant %s."%(vcf_columns[2]));
 
-
+	'''
 	if args.process_slow == 0 or \
 			(args.process_slow == 1 and last_chr==True):
 		stream_vcf.close()
 		bed_out.close()
 		mapper_out.close()
+	'''
 
 	pool_input = [];
 	for chrom in chromosome_pool.keys():
@@ -601,7 +612,6 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 	fun_flush_print("          %d heterozygous sites being used for phasing (%d filtered, %d indels excluded, %d unphased)"%(het_count,filter_count,total_indels_excluded,unphased_count));
 	print
 
-	print(args.chr)
 	if het_count == 0:
 		fatal_error("No heterozygous sites that passed all filters were included in the analysis, phASER cannot continue. Check blacklist and pass_only arguments.");
 
@@ -823,7 +833,8 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 	pool_output = parallelize(test_variant_connection, pool_input);
 
 
-	out_stream = open(args.o+".variant_connections.txt","w");
+	#out_stream = open(args.o+".variant_connections.txt","w");
+	out_stream = open(out_prefix + ".variant_connections.txt", "w");
 	out_stream.write("variant_a\tvariant_b\tsupporting_connections\ttotal_connections\tconflicting_configuration_p\tphase_concordant\n");
 
 	dict_allele_connections = {};
@@ -876,7 +887,8 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 	# output the coverage level per snp
 	# same format as GATK tool:
 
-	stream_out = open(args.o + ".allelic_counts.txt", "w");
+	#stream_out = open(args.o + ".allelic_counts.txt", "w");
+	stream_out = open(out_prefix + ".allelic_counts.txt", "w");
 	stream_out.write("contig	position	variantID	refAllele	altAllele	refCount	altCount	totalCount\n");
 	covered_count = 0;
 
@@ -971,16 +983,19 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 
 	fun_flush_print("#6. Outputting haplotypes...");
 
-	stream_out_ase = open(args.o+".haplotypic_counts.txt","w");
+	#stream_out_ase = open(args.o+".haplotypic_counts.txt","w");
+	stream_out_ase = open(out_prefix + ".haplotypic_counts.txt", "w");
 	ase_columns = ["contig","start","stop","variants","variantCount","variantsBlacklisted","variantCountBlacklisted","haplotypeA","haplotypeB","aCount","bCount","totalCount","blockGWPhase","gwStat","max_haplo_maf","bam","aReads","bReads"];
 	if args.output_read_ids == 1:
 		ase_columns += ["read_ids_a","read_ids_b"];
 	stream_out_ase.write("\t".join(ase_columns)+"\n");
 
-	stream_out = open(args.o+".haplotypes.txt","w");
+	#stream_out = open(args.o+".haplotypes.txt","w");
+	stream_out = open(out_prefix + ".haplotypes.txt", "w");
 	stream_out.write("\t".join(['contig','start','stop','length','variants','variant_ids','variant_alleles','reads_hap_a','reads_hap_b','reads_total','edges_supporting','edges_total','annotated_phase','phase_concordant','gw_phase','gw_confidence'])+"\n");
 
-	stream_out_allele_configs = open(args.o+".allele_config.txt","w");
+	#stream_out_allele_configs = open(args.o+".allele_config.txt","w");
+	stream_out_allele_configs = open(out_prefix + ".allele_config.txt", "w");
 	stream_out_allele_configs.write("\t".join(['variant_a','rsid_a','variant_b','rsid_b','configuration'])+"\n");
 
 	global haplotype_lookup;
@@ -1262,7 +1277,8 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 			#hap_a_network = generate_hap_network([variants, haplotype_a])[0];
 			#hap_b_network = generate_hap_network([variants, haplotype_b])[0];
 			hap_a_network = generate_hap_network_all(variants)[0];
-			stream_out_network = open(args.o+".network.links.txt","w");
+			#stream_out_network = open(args.o+".network.links.txt","w");
+			stream_out_network = open(out_prefix + ".network.links.txt", "w");
 			stream_out_network.write("\t".join(["variantA","variantB","connections","inferred\n"]));
 			nodes = [];
 			#for item in hap_a_network + hap_b_network:
@@ -1274,7 +1290,8 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 					nodes.append(item[1]);
 
 			stream_out_network.close();
-			stream_out_network = open(args.o+".network.nodes.txt","w");
+			#stream_out_network = open(args.o+".network.nodes.txt","w");
+			stream_out_network = open(out_prefix + ".network.nodes.txt", "w");
 			stream_out_network.write("id\tindex\tassigned_hap\n");
 			for item in set(nodes):
 				xvar = item.split(":")[0];
@@ -1371,7 +1388,7 @@ def process_vcf(stream_vcf, chr, contig_ban, set_haplo_blacklist, start_time, vc
 
 	# output VCF
 	if args.write_vcf == 1:
-		unphased_phased, phase_corrected = write_vcf();
+		unphased_phased, phase_corrected = write_vcf(out_prefix, chrom_of_interest);
 
 	total_time = time.time() - start_time;
 
@@ -1769,7 +1786,7 @@ def new_temp_file():
 	xfile.close();
 	return(xfile.name);
 
-def write_vcf():
+def write_vcf(out_prefix, chromosome_of_interest):
 	global args;
 	global haplotype_lookup;
 	global dict_variant_reads;
@@ -1786,8 +1803,10 @@ def write_vcf():
 	else:
 		fun_flush_print("     GT field is not being updated with phASER genome wide phase. This can be changed using the --gw_phase_vcf argument.");
 
-	if args.chr != "":
-		decomp_str = "tabix -h "+args.vcf+" "+args.chr+":"
+	#if args.chr != "":
+		#decomp_str = "tabix -h "+args.vcf+" "+args.chr+":"
+	if chromosome_of_interest != "":
+		decomp_str = "tabix -h "+args.vcf+" "+ chromosome_of_interest + ":"
 	else:
 		decomp_str = "gunzip -c "+args.vcf;
 
@@ -1799,7 +1818,8 @@ def write_vcf():
 	## ** possible manipulation to split input vcf into chunks and pipe it
 	vcf_in = open(tmp_out.name,"r");
 
-	vcf_out = open(args.o+".vcf","w");
+	#vcf_out = open(args.o+".vcf","w");
+	vcf_out = open(out_prefix + ".vcf", "w");
 
 	phase_corrections = 0;
 	unphased_phased = 0;
@@ -1835,7 +1855,8 @@ def write_vcf():
 			chrom = vcf_columns[0];
 			pos = int(vcf_columns[1]);
 
-			if args.chr == "" or chrom == args.chr:
+			#if args.chr == "" or chrom == args.chr:
+			if chromosome_of_interest == "" or chrom == chromosome_of_interest:
 				if "GT" in vcf_columns[8]:
 					gt_index = vcf_columns[8].split(":").index("GT");
 					genotype = list(vcf_columns[9].split(":")[gt_index]);
@@ -1956,7 +1977,10 @@ def write_vcf():
 	fun_flush_print("     Compressing and tabix indexing output VCF...");
 	tabix_cmd = "tabix";
 	if csi_index == 1: tabix_cmd += " --csi";
-	subprocess.check_call("set -euo pipefail && "+"bgzip -f "+args.o+".vcf; "+tabix_cmd+" -f -p vcf "+args.o+".vcf.gz", shell=True, executable='/bin/bash')
+	#subprocess.check_call("set -euo pipefail && "+"bgzip -f "+args.o+".vcf; "+tabix_cmd+" -f -p vcf "+args.o+".vcf.gz", shell=True, executable='/bin/bash')
+	subprocess.check_call("set -euo pipefail && " + "bgzip -f " + \
+						  out_prefix + ".vcf; " + tabix_cmd + " -f -p vcf " \
+						  + out_prefix + ".vcf.gz", shell=True, executable='/bin/bash')
 
 	return([unphased_phased, phase_corrections]);
 
