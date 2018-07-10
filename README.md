@@ -23,17 +23,11 @@ Requires a VCF and BAM, produces a VCF with computed haplotype phases and result
 # Tutorial
 A [step-by-step tutorial](https://github.com/everestial/phaseRB/wiki) for setting up `phaseRB` and running read backphasing is described.
 
-Run command:
-
-python2 phaser.py --bam realigned_ms01e.chr2n3.bam --vcf phased.MySpF1.chr2n3.vcf.gz --sample ms01e --o ms01e --mapq 40 --baseq 10 --paired_end 1 --id_separator - --pass_only 0 --process_slow 1
-
-python phaser.py --bam realigned_ms01e.chr2n3.bam --vcf phased.MySpF1.chr2n3.vcf.gz --sample ms01e --o ms01e --mapq 40 --baseq 10 --paired_end 1 --id_separator - --pass_only 0 --process_slow 1
-
 # Arguments
 ## Required
-* **--bam** - Comma separated list of BAM files containing reads. Duplicates should be marked, and files should be indexed using samtools index.
+* **--bam or --multi_bam** - Comma separated list of BAM files containing reads. Duplicates should be marked, and files should be indexed using samtools index.
 * **--vcf** - VCF file containing genotype for the sample. Must be gzipped and indexed. Chromosome names must be consistent between BAM and VCF.
-* **--sample** - Name of sample to use in VCF file.
+* **--sample or --multi_sample** - Name of sample to use in VCF file.
 * **--baseq** - Minimum base quality at the SNP required for reads to be counted.
 * **--mapq** - Mimimum mapping quality for reads to be counted. Can be a comma separated list, each value corresponding to the min MAPQ for a file in the input BAM list. Useful in cases when using both for example DNA and RNA libraries which having different mapping qualities.
 * **--paired_end** - Sequencing data comes from a paired end assay (0,1). Can be a comma separated list, each value specifying whether sequencing data comes from a paired end assay for a file in the input BAM list. If set to true phASER will require all reads to have the 'read mapped in proper pair' flag.
@@ -56,7 +50,9 @@ python phaser.py --bam realigned_ms01e.chr2n3.bam --vcf phased.MySpF1.chr2n3.vcf
 * **--unphased_vars** _(1)_ - Output unphased variants (singletons) in the haplotypic_counts and haplotypes files (0,1). **NOTE** if you intend to run phASER Gene AE this must be enabled.
 * **--chr_prefix** _()_ - Add this string to the begining of the VCF contig name. For example set to 'chr' if VCF contig is listed as '1' and bam reference is 'chr1'.
 
-## Genome Wide Phasing
+## Genome Wide Phasing 
+**(This can be ignored since we are limiting RBphasing to Blocks)**
+<br>
 * **--gw_phase_method** _(0)_ - Method to use for determing genome wide phasing. NOTE requires input VCF to be phased, and optionally a VCF with allele frequencies (see --gw_af_vcf). 0 = Use most common haplotype phase. 1 = MAF weighted phase anchoring.
 * **--gw_af_field** _('AF')_ - Field from --gw_af_vcf to use for allele frequency.
 * **--gw_phase_vcf** _(0)_ - Replace GT field of output VCF using phASER genome wide phase. 0: do not replace; 1: replace when gw_confidence >= --gw_phase_vcf_min_confidence; 2: as in (1), but in addition replace with haplotype block phase when gw_confidence < --gw_phase_vcf_min_confidence and include PS field. See --gw_phase_method for options.
